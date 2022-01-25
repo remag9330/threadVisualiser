@@ -37,7 +37,17 @@ export class Simulator {
     public async tickThread(threadId: number): Promise<Simulator> {
         const newSim = this.clone();
         await newSim.internalTickThread(threadId);
+        // For some reason, without the below delay, when the thread finishes the React
+        // re-render happens before the state is updated. I think it's just because the
+        // promise from ticking the thread isn't guaranteed to resolve its callbacks in order
+        // between this one and the actual thread calling the update, so this just ensures
+        // it happens afterwards
+        await this.delay(1);
         return newSim;
+    }
+
+    private delay(ms: number): Promise<void> {
+        return new Promise(res => setTimeout(res, ms));
     }
 
     private internalTickThread(threadId: number): Promise<void> {
@@ -59,7 +69,6 @@ export class Simulator {
         for (let i = 0; i < this.threadCount; i++) {
             this.parsedFunction(i, this.parsedGlobals, this.waitForTick.bind(this)).then(
                 succ => {
-                    this.threadPositions[i] = Number.MAX_SAFE_INTEGER;
                     console.log("Thread finished", succ);
                 },
                 err => console.error("Thread failed!", err)

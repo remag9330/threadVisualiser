@@ -20,6 +20,9 @@ export function parseCode(code: string): ThreadFunction {
     }
 
     ast.body = ast.body.flatMap(visitStmt);
+    // This last call below tells the simulator our thread line number is no longer relevant.
+    // But don't await it as that would keep the thread "alive" when there's nothing else after it.
+    ast.body.push(wrapExprInStmt(callWaitForTick(Number.MAX_SAFE_INTEGER)));
 
     if (!ensureBodyNodesAreStatements(ast.body)) {
         throw new Error("Invalid syntax, cannot use directives or import/export statements");
