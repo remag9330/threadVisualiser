@@ -98,6 +98,13 @@ function awaitCallWaitForTick(lineNo: number): T.AwaitExpression {
     }
 }
 
+function wrapCallExpressionInAwait(func: T.CallExpression): T.AwaitExpression {
+    return {
+        type: "AwaitExpression",
+        argument: func
+    };
+}
+
 function wrapExprInStmt(expr: T.Expression): T.ExpressionStatement {
     return {
         type: "ExpressionStatement",
@@ -132,6 +139,7 @@ function wrapStmtsInBlock(stmts: T.Statement[]): T.BlockStatement {
 
 function visitStmt(stmt: T.Statement): T.Statement[] {
     if (stmt.type === "ExpressionStatement") {
+        stmt.expression = visitExpr(stmt.expression);
         return prefixStmtWithAwaitForTickStmt(stmt);
 
     } else if (stmt.type === "BlockStatement") {
@@ -152,7 +160,7 @@ function visitStmt(stmt: T.Statement): T.Statement[] {
         return prefixStmtWithAwaitForTickStmt(stmt);
 
     } else if (stmt.type === "LabeledStatement") {
-        throw new Error("Not implemented");
+        throwNotImplemented();
         
     } else if (stmt.type === "BreakStatement") {
         return prefixStmtWithAwaitForTickStmt(stmt);
@@ -166,7 +174,7 @@ function visitStmt(stmt: T.Statement): T.Statement[] {
         return prefixStmtWithAwaitForTickStmt(stmt);
 
     } else if (stmt.type === "SwitchStatement") {
-        throw new Error("Not implemented");
+        throwNotImplemented();
         
     } else if (stmt.type === "ThrowStatement") {
         return prefixStmtWithAwaitForTickStmt(stmt);
@@ -216,13 +224,142 @@ function visitStmt(stmt: T.Statement): T.Statement[] {
         return [stmt];
         
     } else if (stmt.type === "VariableDeclaration") {
+        stmt.declarations = stmt.declarations.map(d => {
+            d.init = d.init
+                ? d.init = visitExpr(d.init)
+                : d.init;
+
+            return d;
+        });
+
         return prefixStmtWithAwaitForTickStmt(stmt);
         
     } else if (stmt.type === "ClassDeclaration") {
-        throw new Error("Not implemented");
+        throwNotImplemented();
         
     } else {
         const exhaustive: never = stmt;
         throw new Error("Exhaustive check failed: " + JSON.stringify(exhaustive));
     }
+}
+
+function awaitCallOrVisitExpr(expr: T.Expression): T.Expression {
+    expr = visitExpr(expr);
+
+    if (expr.type === "CallExpression") {
+        return wrapCallExpressionInAwait(expr);
+    } else {
+        return expr;
+    }
+}
+
+function visitExpr(expr: T.Expression): T.Expression {
+    if(expr.type === "ThisExpression") {
+        // Nothing to do
+
+    } else if(expr.type === "ArrayExpression") {
+        expr.elements
+            .map(arg =>
+                  arg === null ? null
+                : arg.type === "SpreadElement" ? arg.argument = awaitCallOrVisitExpr(arg.argument)
+                : awaitCallOrVisitExpr(arg)
+            );
+
+    } else if(expr.type === "ObjectExpression") {
+        throwNotImplemented();
+
+    } else if(expr.type === "FunctionExpression") {
+        expr.async = true;
+        expr.body.body = expr.body.body.flatMap(visitStmt);
+
+    } else if(expr.type === "ArrowFunctionExpression") {
+        expr.async = true;
+        expr.body = expr.body.type === "BlockStatement"
+            ? visitStmt(expr.body)[0] as T.BlockStatement
+            : visitExpr(expr.body);
+
+    } else if(expr.type === "YieldExpression") {
+        if (expr.argument) {
+            expr.argument = awaitCallOrVisitExpr(expr.argument);
+        }
+
+    } else if(expr.type === "Literal") {
+        // Nothing to do
+
+    } else if(expr.type === "UnaryExpression") {
+        expr.argument = awaitCallOrVisitExpr(expr.argument);
+
+    } else if(expr.type === "UpdateExpression") {
+        expr.argument = awaitCallOrVisitExpr(expr.argument);
+
+    } else if(expr.type === "BinaryExpression") {
+        expr.left = awaitCallOrVisitExpr(expr.left);
+        expr.right = awaitCallOrVisitExpr(expr.right);
+
+    } else if(expr.type === "AssignmentExpression") {
+        expr.right = awaitCallOrVisitExpr(expr.right);
+
+    } else if(expr.type === "LogicalExpression") {
+        expr.left = awaitCallOrVisitExpr(expr.left);
+        expr.right = awaitCallOrVisitExpr(expr.right);
+
+    } else if(expr.type === "MemberExpression") {
+        throwNotImplemented();
+
+    } else if(expr.type === "ConditionalExpression") {
+        expr.test = awaitCallOrVisitExpr(expr.test);
+        expr.consequent = awaitCallOrVisitExpr(expr.consequent);
+        expr.alternate = awaitCallOrVisitExpr(expr.alternate);
+
+    } else if(expr.type === "CallExpression") {
+        expr.arguments = expr.arguments
+            .map(arg => arg.type === "SpreadElement"
+                ? arg.argument = awaitCallOrVisitExpr(arg.argument)
+                : awaitCallOrVisitExpr(arg)
+            );
+
+    } else if(expr.type === "NewExpression") {
+        if (expr.callee.type !== "Super") {
+            expr.callee = awaitCallOrVisitExpr(expr.callee);
+        }
+
+    } else if(expr.type === "SequenceExpression") {
+        expr.expressions = expr.expressions.map(awaitCallOrVisitExpr);
+
+    } else if(expr.type === "TemplateLiteral") {
+        expr.expressions = expr.expressions.map(awaitCallOrVisitExpr);
+
+    } else if(expr.type === "TaggedTemplateExpression") {
+        expr.tag = awaitCallOrVisitExpr(expr.tag);
+        expr = awaitCallOrVisitExpr(expr.quasi);
+
+    } else if(expr.type === "ClassExpression") {
+        throwNotImplemented();
+
+    } else if(expr.type === "MetaProperty") {
+        throwNotImplemented();
+
+    } else if(expr.type === "Identifier") {
+        // Nothing to do
+
+    } else if(expr.type === "AwaitExpression") {
+        expr.argument = awaitCallOrVisitExpr(expr.argument);
+
+    } else if(expr.type === "ImportExpression") {
+        expr.source = awaitCallOrVisitExpr(expr.source);
+
+    } else if(expr.type === "ChainExpression") {
+        throwNotImplemented();
+
+    } else {        
+        const exhaustive: never = expr;
+        throw new Error("Exhaustive check failed: " + JSON.stringify(exhaustive));
+    }
+
+    return expr;
+}
+
+function throwNotImplemented(msg?: string): never {
+    msg = msg ? " " + msg : msg;
+    throw new Error(`Not implemented!${msg}`);
 }
